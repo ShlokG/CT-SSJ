@@ -537,40 +537,31 @@ else
     J_piG = -rho_disc * kappa_w * gamma / C;                                               % contemporaneous partial equilibrium response of inflation to change in G
     J_pir = zeros(T);                                                                      % contemporaneous partial equilibrium response of inflation to change in Y
 
-    JrYG = phiIF * J_piY;    % partial equilibrium effect of change in Y on r
-    J_Tr = eye(T) * Capital; % taxes increase to keep debt unchanged
-
-    % asset jacobian accounting for effect on interest rates and thus taxes
-    A = K * (eye(T) - J_wC - J_rC * JrYG + J_wC * J_Tr * JrYG); % asset jacobian
-    cM = A(1:T2, 1:T2) \ K(1:T2, 1:T2);
+    J_Tr  = eye(T) * Capital; % taxes increase to keep debt unchanged
 
     % GE jacobian of Y and r to a G shock
-    J_YG2 = (eye(T) + J_rC * phiIF * J_piG - J_wC * J_Tr * phiIF * J_piG);
-    J_YG = cM * J_YG2(1:T2,1:T2);
-    J_rG = JrYG(1:T2, 1:T2) * J_YG + phiIF(1:T2, 1:T2) * J_piG(1:T2, 1:T2);
+    B = eye(T) - phiIF * (J_pir + J_piT * J_Tr + J_piY * ((eye(T) - J_wC) \ (J_rC - J_wC * J_Tr)));
+    J_rG = B \ (phiIF * (J_piY / (eye(T) - J_wC) + J_piG));
+    J_YG = (eye(T) - J_wC) \ (J_rC * J_rG - J_wC * J_Tr * J_rG + eye(T));
 
     % GE jacobian of Y and r to a T shock
-    J_YT2 = (J_rC * phiIF * J_piT - J_wC - J_wC * J_Tr * phiIF * J_piT);
-    J_YT = cM * J_YT2(1:T2,1:T2);
-    J_rT = phiIF(1:T2, 1:T2) * (J_piY(1:T2, 1:T2) * J_YT + J_piT(1:T2, 1:T2));
+    J_rT = B \ (phiIF * (J_piT - J_piY / (eye(T) - J_wC) * J_wC));
+    J_YT = (eye(T) - J_wC) \ ((J_rC - J_wC * J_Tr) * J_rT - J_wC);
 
     % GE jacobian of Y and r to aggregate productivity shock
-    J_YZ2 = J_rC * phiIF * J_piZ;
-    J_YZ = cM * J_YZ2(1:T2,1:T2);
-    J_rZ = phiIF(1:T2, 1:T2) * (J_piY(1:T2, 1:T2) * J_YZ + J_piZ(1:T2, 1:T2));
+    J_rZ = B \ (phiIF * J_piZ);
+    J_YZ = (eye(T) - J_wC) \ (J_rC * J_rZ - J_wC * J_Tr * J_rZ);
     
     % GE jacobian of Y and r to interest rate shock
-    JrYe = (eye(T) - phiIF * J_pir) \ eye(T);
-    J_Yeps2 = J_rC * JrYe;
-    J_Yeps = cM * J_Yeps2(1:T2,1:T2);
-    J_reps = JrYe(1:T2, 1:T2) * ((phi - 1) * J_piY(1:T2, 1:T2) * J_Yeps + eye(T2));
+    J_reps = B \ eye(T);
+    J_Yeps = (eye(T) - J_wC) \ ((J_rC - J_wC * J_Tr) * J_reps);
 
     % impulse responses for 1) G and corresponding T shocks and 2) r shock
-    dY_dG_ge = J_YG * dG + J_YT * dT;
-    dY_dr_ge = J_Yeps * dr;
+    dY_dG_ge = J_YG(1:T2, 1:T2) * dG + J_YT(1:T2, 1:T2) * dT;
+    dY_dr_ge = J_Yeps(1:T2, 1:T2) * dr;
     
-    dr_dG_ge = J_rG * dG + J_rT * dT;
-    dr_dr_ge = J_reps * dr;
+    dr_dG_ge = J_rG(1:T2, 1:T2) * dG + J_rT(1:T2, 1:T2) * dT;
+    dr_dr_ge = J_reps(1:T2, 1:T2) * dr;
 end
 
 %% plot partial equilibrium MPC matrix

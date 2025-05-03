@@ -107,6 +107,7 @@ inputs     = ['r', 'Z'] # prices for discrete time
 outputs_dt = ['C', 'A'] # outputs for discrete time
 h          = 1E-4       # perturbation size for numerical differentiation
 twosided   = False      # one-sided numerical differentiation
+T2         = T - 10     # need to shrink matrix for inversion
 
 dt_ss      = hh_het.extract_ss_dict(dt_ss)
 outputs_dt = hh_het.M_outputs.inv @ outputs_dt

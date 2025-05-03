@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from toolkit.utils import markov_rouwenhorst
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
-from scipy.linalg import solve
+from scipy.linalg import solve, toeplitz
 import time
 
 # start timer
@@ -462,7 +462,10 @@ print(f'Step 3 & 4 in Jacobians: fake news and Jacobians: {time.time() - time6:.
 # impulse responses to aggregate shocks
 
 # shocks
-T2 = T - 10 # reduce T since matrix non-invertible otherwise
+if phi == 1.0:
+    T2 = T - 10 # reduce T since matrix non-invertible otherwise
+else:
+    T2 = T # With active monetary policy, can invert without pre-multiplication
 dG = np.array([np.exp(-rho_G * i * dt) for i in range(T2)]) # shock to govt spending
 dr = np.array([rho_r ** (i * dt) for i in range(T2)]) # shock to interest rates
 
@@ -497,7 +500,7 @@ if phi == 1.0: # passive monetary policy
     dY_dr_ge = cM @ (J_rC[:T2, :T2] @ dr - J_wC[:T2, :T2] @ dT_bal) # Y response to r shock, accounting for induced change in R
 
 else:  # expressions more complicated if active monetary policy
-    rho_disc = np.triu(np.exp(-rho) ** (np.arange(T) * dt), 0)  # discounting of future
+    rho_disc = np.triu(toeplitz(np.exp(-rho) ** (np.arange(T) * dt)), 0)  # discounting of future
 
     # forward matrix since inflation next period matters
     Fmat     = np.eye(T)
@@ -511,33 +514,24 @@ else:  # expressions more complicated if active monetary policy
     J_piG = -rho_disc * kappa_w * gamma / C  # contemporaneous partial equilibrium response of inflation to change in G
     J_pir = np.zeros((T, T))  # contemporaneous partial equilibrium response of inflation to change in Y
 
-    JrYG = phiIF @ J_piY       # partial equilibrium effect of change in Y on r
     J_Tr = np.eye(T) * Capital # taxes increase to keep debt unchanged
 
-    # asset jacobian accounting for effect on interest rates and thus taxes
-    A  = K @ (np.eye(T) - J_wC - J_rC @ JrYG + J_wC @ J_Tr @ JrYG) # asset jacobian
-    cM = np.linalg.solve(A[:T2, :T2], K[:T2, :T2])
-
     # GE jacobian of Y and r to a G shock
-    J_YG2 = (np.eye(T) + J_rC @ phiIF @ J_piG - J_wC @ J_Tr @ phiIF @ J_piG)
-    J_YG  = cM @ J_YG2[:T2, :T2]
-    J_rG  = JrYG[:T2, :T2] @ J_YG + phiIF[:T2, :T2] @ J_piG[:T2, :T2]
+    B = np.eye(T) - phiIF @ (J_pir + J_piT @ J_Tr + J_piY @ np.linalg.solve(np.eye(T) - J_wC, J_rC - J_wC @ J_Tr))
+    J_rG = np.linalg.solve(B, phiIF @ (J_piY @ np.linalg.inv(np.eye(T) - J_wC) + J_piG))
+    J_YG = np.linalg.solve(np.eye(T) - J_wC, J_rC @ J_rG - J_wC @ J_Tr @ J_rG + np.eye(T))
 
     # GE jacobian of Y and r to a T shock
-    J_YT2 = (J_rC @ phiIF @ J_piT - J_wC - J_wC @ J_Tr @ phiIF @ J_piT)
-    J_YT  = cM @ J_YT2[:T2, :T2]
-    J_rT  = phiIF[:T2, :T2] @ (J_piY[:T2, :T2] @ J_YT + J_piT[:T2, :T2])
+    J_rT = np.linalg.solve(B, phiIF @ (J_piT - J_piY @ np.linalg.solve(np.eye(T) - J_wC, J_wC)))
+    J_YT = np.linalg.solve(np.eye(T) - J_wC, (J_rC - J_wC @ J_Tr) @ J_rT - J_wC)
 
     # GE jacobian of Y and r to aggregate productivity shock
-    J_YZ2 = J_rC @ phiIF @ J_piZ
-    J_YZ  = cM @ J_YZ2[:T2, :T2]
-    J_rZ  = phiIF[:T2, :T2] @ (J_piY[:T2, :T2] @ J_YZ + J_piZ[:T2, :T2])
+    J_rZ = np.linalg.solve(B, phiIF @ J_piZ)
+    J_YZ = np.linalg.solve(np.eye(T) - J_wC, J_rC @ J_rZ - J_wC @ J_Tr @ J_rZ)
     
     # GE jacobian of Y and r to interest rate shock
-    JrYe    = solve(np.eye(T) - phiIF @ J_pir, np.eye(T))
-    J_Yeps2 = J_rC @ JrYe
-    J_Yeps  = cM @ J_Yeps2[:T2, :T2]
-    J_reps  = JrYe[:T2, :T2] @ ((phi - 1) * J_piY[:T2, :T2] @ J_Yeps + np.eye(T2))
+    J_reps = np.linalg.inv(B)
+    J_Yeps = np.linalg.solve(np.eye(T) - J_wC, (J_rC - J_wC @ J_Tr) @ J_reps)
 
     # impulse responses for 1) G and corresponding T shocks and 2) r shock
     dY_dG_ge = J_YG @ dG + J_YT @ dT

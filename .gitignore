@@ -174,3 +174,11 @@ cython_debug/
 *.png
 *.tex
 *.csv
+Python/Figures/.DS_Store
+Python/sequence_jacobian/.DS_Store
+Python/Storage/.DS_Store
+Python/toolkit/.DS_Store
+Python/.DS_Store
+MATLAB/Figures/.DS_Store
+.DS_Store
+.gitignore

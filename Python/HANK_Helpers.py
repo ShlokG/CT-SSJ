@@ -22,7 +22,7 @@ def getM(r, T, T2, J_CY, A = None):
 
 # Calculate all the GE Jacobians and IRFs
 def GE_Jacs(J, dG, dT, dr, T, T2, p, r, C, Capital, M = None):
-    if M is None:
+    if M is None and p['phi'] == 1.0:
         q = (1 + r) ** (-np.arange(T))
         K = np.triu(toeplitz(-q), 1)
 
@@ -59,37 +59,33 @@ def GE_Jacs(J, dG, dT, dr, T, T2, p, r, C, Capital, M = None):
         J_piT = rho_disc * p['kappa_w'] * 1/(p['Yss'] * (1 - p['T_share']))
         J_piG = -rho_disc * p['kappa_w'] * p['gamma'] / C
         J_pir = np.zeros(T)
-
-        # intermediate jacobians used in GE jacobians later
-        JrYT = np.linalg.inv(np.eye(T) - phiIF @ J_pir) @ phiIF
-        JrYG = JrYT @ J_piY
-        J_Tr = np.eye(T) * Capital # taxes change to interest rate shock to keep assets constant
-
-        # if not passed in curlyM, calculate accounting for effect on interest rates
-        if M is None:
-            A = K @ (np.eye(T) - J['w']['C'] - J['r']['C'] @ JrYG + J['w']['C'] @ J_Tr @ JrYG) # Asset Jacobian
-            M = np.linalg.solve(A[:T2,:T2], K[:T2,:T2])
-
-        # GE Jacobians of output and interest rates to government spending shock
-        J_YG = M @ (np.eye(T) + J['r']['C'] @ JrYT @ J_piG - J['w']['C'] @ J_Tr @ JrYT @ J_piG)[:T2,:T2]
-        J_rG = JrYG[:T2,:T2] @ J_YG + JrYT[:T2,:T2] @ J_piG[:T2,:T2]
-
-        # GE Jacobians of output and interest rates to tax shock
-        J_YT = M @ (J['r']['C'] @ JrYT @ J_piT - J['w']['C'] - J['w']['C'] @ J_Tr @ JrYT @ J_piT)[:T2,:T2]
-        J_rT = JrYT[:T2,:T2] @ (J_piY[:T2,:T2] @ J_YT + J_piT[:T2,:T2])
-
-        # GE Jacobians of output and interest rates to productivity shock
-        J_YZ = M @ (J['r']['C'] @ JrYT @ J_piZ)[:T2,:T2]
-        J_rZ = JrYT[:T2,:T2] @ (J_piY[:T2,:T2] @ J_YZ + J_piZ[:T2,:T2])
         
-        # GE Jacobians of output and interest rates to interest rate shock
-        JrYe   = np.linalg.inv(np.eye(T) - phiIF @ J_pir)
-        J_Yeps = M @ (J['r']['C'] @ JrYe)[:T2,:T2]
-        J_reps = JrYe[:T2,:T2] @ ((p['phi'] - 1) * J_piY[:T2,:T2] @ J_Yeps + np.eye(T2))
+        # intermediate jacobians used in GE jacobians later
+        J_Tr = np.eye(T) * Capital # taxes increase to keep debt unchanged
+        J_rC = J['r']['C']
+        J_wC = J['w']['C']
+        if M is None:
+            M = np.eye(T) - phiIF @ (J_pir + J_piT @ J_Tr + J_piY @ np.linalg.solve(np.eye(T) - J_wC, J_rC - J_wC @ J_Tr))
+
+        # GE jacobian of Y and r to a G shock
+        J_rG = np.linalg.solve(M, phiIF @ (J_piY @ np.linalg.inv(np.eye(T) - J_wC) + J_piG))
+        J_YG = np.linalg.solve(np.eye(T) - J_wC, J_rC @ J_rG - J_wC @ J_Tr @ J_rG + np.eye(T))
+
+        # GE jacobian of Y and r to a T2 shock
+        J_rT = np.linalg.solve(M, phiIF @ (J_piT - J_piY @ np.linalg.solve(np.eye(T) - J_wC, J_wC)))
+        J_YT = np.linalg.solve(np.eye(T) - J_wC, (J_rC - J_wC @ J_Tr) @ J_rT - J_wC)
+
+        # GE jacobian of Y and r to aggregate productivity shock
+        J_rZ = np.linalg.solve(M, phiIF @ J_piZ)
+        J_YZ = np.linalg.solve(np.eye(T) - J_wC, J_rC @ J_rZ - J_wC @ J_Tr @ J_rZ)
+        
+        # GE jacobian of Y and r to interest rate shock
+        J_reps = np.linalg.inv(M)
+        J_Yeps = np.linalg.solve(np.eye(T) - J_wC, (J_rC - J_wC @ J_Tr) @ J_reps)
 
         # GE IRFs of output and interest rates to G, T, and r shocks
-        dY_ge = J_YG @ dG + J_YT @ dT + J_Yeps @ dr
-        dr_ge = J_rG @ dG + J_rT @ dT + J_reps @ dr
+        dY_ge = J_YG[:T2, :T2] @ dG + J_YT[:T2, :T2] @ dT + J_Yeps[:T2, :T2] @ dr
+        dr_ge = J_rG[:T2, :T2] @ dG + J_rT[:T2, :T2] @ dT + J_reps[:T2, :T2] @ dr
 
     return M, dY_ge, dr_ge
 
@@ -161,7 +157,7 @@ def getM_dt(r, T, T2, A):
 def GE_Jacs_dt(J, dG, dT, dr, T, T2, p, r, C, Capital, curlyMs = None):
     if p['phi'] == 1:
         if curlyMs is None:
-            curlyMs = getM(r, T, T, J['A']['Z'], A = J['A']['Z'])
+            curlyMs = getM(r, T, T, J['C']['Z'], A = J['A']['Z'])
 
         # Get GE IRFs to G,T and r shock
         dY_dG_DT = curlyMs[:T2,:T2] @ (dG - J['C']['Z'][:T2,:T2] @ dT)
@@ -170,7 +166,7 @@ def GE_Jacs_dt(J, dG, dT, dr, T, T2, p, r, C, Capital, curlyMs = None):
         dY_dr_DT = curlyMs[:T2,:T2] @ (J['C']['r'][:T2,:T2] @ dr - J['C']['Z'][:T2,:T2] @ dT_bal)
 
         dY = dY_dG_DT + dY_dr_DT
-        dr = np.ones(T2) * dr
+        dr_ge = np.ones(T2) * dr
 
     # Get correct discrete-time formulas if phi > 1
     ## Not set up for r shock
@@ -182,17 +178,16 @@ def GE_Jacs_dt(J, dG, dT, dr, T, T2, p, r, C, Capital, curlyMs = None):
         kap_tilde = p['kappa_w'] / (p['Yss'] / p['xi']) * kap_denom
         Kw = kap_tilde * np.triu(toeplitz(p['beta']**(np.arange(T))), 0)
         J_Tr = np.eye(T) * Capital # Capital is Bss here
-        dY_inv = np.eye(T) - J['C']['Z'] - (J['C']['r'] - J['C']['Z'] @ J_Tr) @ phiIF @ Kw
-
+        
+        X1 = p['Yss']/C * p['gamma'] / p['xi'] / kap_denom
+        X2 = 1 / (kap_denom * (1 - p['T_share']) * p['xi'])
+        
         if curlyMs is None:
-            curlyMs = getM_dt(r, T, T2, dY_inv)
-        dYn_ge_DT = (p['Yss']/C * p['gamma'] / p['xi'] / kap_denom * dG - dT / (kap_denom * (1 - p['T_share']) * p['xi']))
-        dY_dG_DT = curlyMs[:T2,:T2] @ (dG - J['C']['Z'][:T2,:T2] @ dT - ((J['C']['r'] - J['C']['Z'] @ J_Tr) @ phiIF @ Kw)[:T2,:T2] @ dYn_ge_DT)
-        dr_dG_DT = (phiIF @ Kw)[:T2,:T2] @ (dY_dG_DT - dYn_ge_DT[:T2])
+            curlyMs = np.eye(T) - phiIF @ Kw @ ((np.eye(T) * X2) @ J_Tr + np.linalg.solve(np.eye(T) - J['C']['Z'], J['C']['r'] - J['C']['Z'] @ J_Tr))
+        
+        dr_ge = np.linalg.solve(curlyMs[:T2,:T2], (phiIF @ Kw)[:T2,:T2] @ (np.linalg.solve((np.eye(T) - J['C']['Z'])[:T2,:T2], dG - J['C']['Z'][:T2,:T2] @ dT) - (np.eye(T2) * X1) @ dG + (np.eye(T2) * X2) @ dT))
+        dY = np.linalg.solve((np.eye(T) - J['C']['Z'])[:T2,:T2], (dG - J['C']['Z'][:T2,:T2] @ dT + (J['C']['r'] - J['C']['Z'] @ J_Tr)[:T2,:T2] @ dr_ge))
 
-        dY = dY_dG_DT
-        dr = dr_dG_DT
-
-    return curlyMs, dY, dr
+    return curlyMs, dY, dr_ge
 
 
