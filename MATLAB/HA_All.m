@@ -243,12 +243,20 @@ DA_T    = spdiags(Sm1(:)             , 0 , Ntot, Ntot) ...
         + spdiags(Sb1(1:Ntot-1)'     , -1, Ntot, Ntot) ...
         + spdiags([0 ; Sf1(2:Ntot)'] , 1 , Ntot, Ntot) ;
 
-DA      = -DA_T'; % construct d/da matrix for values
+% construct d/da matrix for values
+sav_sign = sign(Sm1);  % get whether saving/dissaving for later
+
+Sm1(1,:) = 1/da(1);
+Sb1(1,:) = -1/da(1);
+Sf1(1,:) = 0;
+
+DA = -spdiags(Sm1(:), 0, Ntot, Ntot) ...
+    - spdiags(Sf1(2:Ntot)', -1, Ntot, Ntot) ...
+    - spdiags([0; Sb1(1:Ntot-1)'], 1, Ntot, Ntot);
 
 % calculate other necessary values
 
 % get asset index agent moving to via saving for later use
-sav_sign = sign(Sm1);                         % get whether saving/dissaving
 S_da     = -full(diag(S) / mu * dt);          % num gridpts moving via savings at each index
 S_pts    = reshape(S_da, Na, Nz) .* sav_sign; % get correct sign on num gridpts moved
 a_ind    = floor(S_pts) + (1:Na)';            % from change in gridpt to new gridpt moving to

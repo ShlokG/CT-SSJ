@@ -248,7 +248,14 @@ DA_T = sp.diags(Sm1.flatten(), 0, shape = (Ntot, Ntot)) + \
                     sp.diags(Sb1.flatten()[:-1], -1, shape = (Ntot, Ntot)) + \
                     sp.diags(Sf1.flatten()[1:], 1, shape = (Ntot, Ntot))
 
-DA = -DA_T.T # construct d/da matrix for values
+# construct d/da matrix for values
+Sm1[:,0] = 1/da[0]
+Sb1[:,0] = -1/da[0]
+Sf1[:,0] = 0
+
+DA = -sp.diags(Sm1.flatten(), 0, shape = (Ntot, Ntot)) - \
+                    sp.diags(Sf1.flatten()[1:], -1, shape = (Ntot, Ntot)) - \
+                    sp.diags(Sb1.flatten()[:-1], 1, shape = (Ntot, Ntot))
 
 # calculate other necessary values
 

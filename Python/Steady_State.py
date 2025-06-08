@@ -624,7 +624,15 @@ def prelim_step(ss, n, EGM = True, dt = 1.0):
                         sp.diags(Sb1.flatten()[:-1], -1, shape = (n['Ntot'], n['Ntot'])) + \
                         sp.diags(Sf1.flatten()[1:], 1, shape =(n['Ntot'], n['Ntot']))
 
-    ss['DA'] = -ss['DA_T'].transpose() # construct d/da matrix for values
+    # construct d/da matrix for values
+    Sm1[:,0] = 1/n['da'][0]
+    Sb1[:,0] = -1/n['da'][0]
+    Sf1[:,0] = 0
+
+    ss['DA'] = -sp.diags(Sm1.flatten(), 0, shape = (n['Ntot'], n['Ntot'])) - \
+                        sp.diags(Sf1.flatten()[1:], -1, shape = (n['Ntot'], n['Ntot'])) - \
+                        sp.diags(Sb1.flatten()[:-1], 1, shape = (n['Ntot'], n['Ntot']))
+
 
     # get asset index agent moving to via saving for later use
 
