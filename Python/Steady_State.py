@@ -589,14 +589,20 @@ def forward_steady_state_endog(D_endog, n, Pi_T, a_ind, sav_wt):
 
     return D
 
-def prelim_step(ss, n, EGM = True, dt = 1.0):
+def prelim_step(ss, n, EGM = True, dt = 1.0, iter_style = None, nonuniform = False):
     """Calculate necessary values for Jacobian calculations after getting the steady state.
-    
+
     Args:
         ss: Dict giving the steady state values.
         n: Dict giving the numerical parameters (eg. grid size, etc.)
         EGM: False if implicit method used to get SS. True for EGM
         dt: Time step
+        iter_style: If 'DT_loop', skip building S_stable (only used by CT_matrix
+            forward iteration) and skip S_npy unless nonuniform=True. Default
+            None preserves the original behavior of building everything.
+        nonuniform: If True (and iter_style='DT_loop'), still build S_npy because
+            the hybrid-fast nonuniform path (asset_explicit_step) reads it. If
+            False, S_npy is also skipped under DT_loop.
     """
 
     # get which constrained
@@ -639,13 +645,6 @@ def prelim_step(ss, n, EGM = True, dt = 1.0):
     # Need to get a_ind and sav_wt if not EGM for iterating distribution forward
     ## in phi and cE calculations
     if not EGM:
-        # Get lhs_inv for phi calculation if using calc_phi_HJB.
-        lhs_inv = sp.eye(n['Ntot'], format = "csc")
-        lhs_inv[ss['consted_ind'], ss['consted_ind'] + 1] = 1
-        M_L = sp.eye(n['Ntot'], format = "csc") + ss['L']
-        M_L[ss['consted_ind'], :] = 0
-        ss['lhs_mat'] = lhs_inv @ M_L
-
         # get asset index agent moving to via saving for later use
         sav_sign = np.sign(Sm1)                              # get whether saving/dissaving
         S_da     = -ss['S'].diagonal() / n['mu'] * dt        # amount saved at each index
@@ -670,33 +669,47 @@ def prelim_step(ss, n, EGM = True, dt = 1.0):
     ss['a_ind'][out_of_bounds_low]  = 0
     ss['a_ind']                     = ss['a_ind'] - np.arange(n['Na']) # convert back to change in gridpts
 
-    # adjust mu at gridpts where savings would push agents out of
-    # bounds to ensure correct mass moving to endpoint
-    mu_mat = np.ones((n['Nz'], n['Na'])) * n['mu']         # define a separate mass leaving for each gridpt
+    # The mu_mat boundary adjustment, S_stable, and S_npy are only needed by
+    # CT_loop / CT_matrix forward iteration (via S_npy / S_stable) and by the
+    # hybrid-fast nonuniform path (via S_npy). Under DT_loop with no nonuniform
+    # path, none of these are touched, so skip the entire block.
+    skip_S_stable = (iter_style == 'DT_loop')
+    skip_S_npy    = (iter_style == 'DT_loop') and not nonuniform
 
-    # saving too much
-    pts_moved                  = (n['amax'] - n['aa'][out_of_bounds_high])                # gridpts actually moved
-    pts_supposed               = S_pts[out_of_bounds_high] * n['daa'][out_of_bounds_high] # gridpts supposed to move
-    pts_moved                  = np.maximum(pts_moved, 1e-12)                             # pts_moved can be 0 if starting at max gridpt; then, set mass to 1
-    mu_mat[out_of_bounds_high] = np.minimum(pts_supposed / pts_moved * n['mu'], 1)        # increase mass leaving so correct transition maintained
+    if not (skip_S_stable and skip_S_npy):
+        # adjust mu at gridpts where savings would push agents out of
+        # bounds to ensure correct mass moving to endpoint
+        mu_mat = np.ones((n['Nz'], n['Na'])) * n['mu']         # define a separate mass leaving for each gridpt
 
-    # repeat for case when dissaving too much
-    pts_moved                 = n['aa'][out_of_bounds_low] - n['a'][0]                  # gridpts actually moved
-    pts_supposed              = -S_pts[out_of_bounds_low] * n['daa'][out_of_bounds_low] # gridpts supposed to move
-    mu_mat[out_of_bounds_low] = np.minimum(pts_supposed / pts_moved * n['mu'], 1)       # increase mass leaving so correct transition maintained
+        # saving too much
+        pts_moved                  = (n['amax'] - n['aa'][out_of_bounds_high])                # gridpts actually moved
+        pts_supposed               = S_pts[out_of_bounds_high] * n['daa'][out_of_bounds_high] # gridpts supposed to move
+        pts_moved                  = np.maximum(pts_moved, 1e-12)                             # pts_moved can be 0 if starting at max gridpt; then, set mass to 1
+        mu_mat[out_of_bounds_high] = np.minimum(pts_supposed / pts_moved * n['mu'], 1)        # increase mass leaving so correct transition maintained
 
-    # convert a_ind and sav_wt into a transition matrix
-    # akin to LT but can move multiple asset gridpts for stability and rows sum to 1, not 0
-    sav_data = np.concatenate([(ss['sav_wt'] * mu_mat).ravel(), ((1 - ss['sav_wt']) * mu_mat).ravel()]) # multiply by mu so only fraction moves
-    sav_rows = np.concatenate([np.arange(n['Ntot']), np.arange(n['Ntot'])])
-    cols     = range(n['Ntot']) + ss['a_ind'].ravel()
-    sav_cols = np.concatenate([cols, cols + 1])
-    S_stable = sp.csr_matrix((sav_data, (sav_rows, sav_cols)), shape = (n['Ntot'], n['Ntot']))
+        # repeat for case when dissaving too much
+        pts_moved                 = n['aa'][out_of_bounds_low] - n['a'][0]                  # gridpts actually moved
+        pts_supposed              = -S_pts[out_of_bounds_low] * n['daa'][out_of_bounds_low] # gridpts supposed to move
+        mu_mat[out_of_bounds_low] = np.minimum(pts_supposed / pts_moved * n['mu'], 1)       # increase mass leaving so correct transition maintained
 
-    ss['S_stable'] = (S_stable - sp.diags(mu_mat.ravel())) / dt # subtract mass leaving
-    ss['a_ind']    = ss['a_ind'] + np.arange(n['Na'])           # get index of asset gridpoint moving to, not change in index
+        # sav_data is shared by both S_stable and S_npy
+        sav_data = np.concatenate([(ss['sav_wt'] * mu_mat).ravel(), ((1 - ss['sav_wt']) * mu_mat).ravel()]) # multiply by mu so only fraction moves
 
-    # write S_stable as numpy array for compatibility with numba; needed if iter_style is CT_loop
-    ss['S_npy'] = np.vstack((sav_data[:n['Ntot']], sav_data[n['Ntot']:], -mu_mat.ravel())).T / dt
+        # S_stable: only used by CT_matrix forward iteration (forward_step_matrix)
+        if not skip_S_stable:
+            # convert a_ind and sav_wt into a transition matrix
+            # akin to LT but can move multiple asset gridpts for stability and rows sum to 1, not 0
+            sav_rows = np.concatenate([np.arange(n['Ntot']), np.arange(n['Ntot'])])
+            cols     = range(n['Ntot']) + ss['a_ind'].ravel()
+            sav_cols = np.concatenate([cols, cols + 1])
+            S_stable = sp.csr_matrix((sav_data, (sav_rows, sav_cols)), shape = (n['Ntot'], n['Ntot']))
+
+            ss['S_stable'] = (S_stable - sp.diags(mu_mat.ravel())) / dt # subtract mass leaving
+
+        # S_npy: used by CT_loop forward iteration AND by hybrid-fast nonuniform path
+        if not skip_S_npy:
+            ss['S_npy'] = np.vstack((sav_data[:n['Ntot']], sav_data[n['Ntot']:], -mu_mat.ravel())).T / dt
+
+    ss['a_ind'] = ss['a_ind'] + np.arange(n['Na'])           # get index of asset gridpoint moving to, not change in index
 
     return ss

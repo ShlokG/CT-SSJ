@@ -182,3 +182,5 @@ Python/.DS_Store
 MATLAB/Figures/.DS_Store
 .DS_Store
 .gitignore
+*.pdf
+*.json

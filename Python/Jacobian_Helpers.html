@@ -79,6 +79,46 @@ def J_from_F(F, dt = 1.0):
 <dd>Jacobian matrix</dd>
 </dl></div>
 </dd>
+<dt id="Jacobian_Helpers.J_from_F_nonuniform"><code class="name flex">
+<span>def <span class="ident">J_from_F_nonuniform</span></span>(<span>F, dt_col)</span>
+</code></dt>
+<dd>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit
+def J_from_F_nonuniform(F, dt_col):
+    &#34;&#34;&#34;Helper function to calculate the Jacobian with non-uniform time steps
+
+    Args:
+        F: Fake news matrix (T x T)
+        dt_col: Time step for each column index (length T array).
+            dt_col[s] is the duration of the time interval at index s.
+
+    Returns:
+        J: Jacobian matrix (T x T)
+    &#34;&#34;&#34;
+    J = F.copy()
+    for t in range(1, J.shape[0]):
+        J[1:, t] = J[:-1, t - 1] + dt_col[t] * F[1:, t]
+    return J</code></pre>
+</details>
+<div class="desc"><p>Helper function to calculate the Jacobian with non-uniform time steps</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>F</code></strong></dt>
+<dd>Fake news matrix (T x T)</dd>
+<dt><strong><code>dt_col</code></strong></dt>
+<dd>Time step for each column index (length T array).
+dt_col[s] is the duration of the time interval at index s.</dd>
+</dl>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>J</code></dt>
+<dd>Jacobian matrix (T x T)</dd>
+</dl></div>
+</dd>
 <dt id="Jacobian_Helpers.calc_D"><code class="name flex">
 <span>def <span class="ident">calc_D</span></span>(<span>gm,<br>rho,<br>LT_c,<br>U,<br>phi,<br>LT_p,<br>T,<br>dt=1.0,<br>L_c=None,<br>dphi_da=None,<br>u_cp=None,<br>u_cz=None,<br>c_t=None,<br>price=True)</span>
 </code></dt>
@@ -308,26 +348,34 @@ from a change in the mass at gridpoint x at time 0 under steady-state policy rul
 </dl></div>
 </dd>
 <dt id="Jacobian_Helpers.calc_J"><code class="name flex">
-<span>def <span class="ident">calc_J</span></span>(<span>F, outputs, dt=1.0)</span>
+<span>def <span class="ident">calc_J</span></span>(<span>F, outputs, dt=1.0, dt_vec=None)</span>
 </code></dt>
 <dd>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def calc_J(F, outputs, dt = 1.0):
+<pre><code class="python">def calc_J(F, outputs, dt = 1.0, dt_vec = None):
     &#34;&#34;&#34;Calculates the Jacobian for each output by adding up diagonals of the fake news matrix
 
     Args:
         F: A dictionary of fake news matrices.
         outputs: A list of output variables.
+        dt: Uniform time step (scalar, used when dt_vec is None).
+        dt_vec: Non-uniform time step sizes (array of length T-1). Overrides dt if provided.
 
     Returns:
         J: A dictionary of Jacobian matrices.
     &#34;&#34;&#34;
     J = {}
-    for output in outputs:
-        J[output] = J_from_F(F[output], dt = dt) * dt
+    if dt_vec is not None:
+        # Build length-T column scaling: dt_col[s] is the shock duration at index s
+        dt_col = np.append(dt_vec, dt_vec[-1])  # repeat last step for boundary
+        for output in outputs:
+            J[output] = J_from_F_nonuniform(F[output], dt_col) * dt_col[np.newaxis, :]
+    else:
+        for output in outputs:
+            J[output] = J_from_F(F[output], dt = dt) * dt
 
     return J</code></pre>
 </details>
@@ -338,6 +386,10 @@ from a change in the mass at gridpoint x at time 0 under steady-state policy rul
 <dd>A dictionary of fake news matrices.</dd>
 <dt><strong><code>outputs</code></strong></dt>
 <dd>A list of output variables.</dd>
+<dt><strong><code>dt</code></strong></dt>
+<dd>Uniform time step (scalar, used when dt_vec is None).</dd>
+<dt><strong><code>dt_vec</code></strong></dt>
+<dd>Non-uniform time step sizes (array of length T-1). Overrides dt if provided.</dd>
 </dl>
 <h2 id="returns">Returns</h2>
 <dl>
@@ -1071,6 +1123,7 @@ Implies 1-x_pi is probability of moving to x_i + 1</dd>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
 <li><code><a title="Jacobian_Helpers.J_from_F" href="#Jacobian_Helpers.J_from_F">J_from_F</a></code></li>
+<li><code><a title="Jacobian_Helpers.J_from_F_nonuniform" href="#Jacobian_Helpers.J_from_F_nonuniform">J_from_F_nonuniform</a></code></li>
 <li><code><a title="Jacobian_Helpers.calc_D" href="#Jacobian_Helpers.calc_D">calc_D</a></code></li>
 <li><code><a title="Jacobian_Helpers.calc_E" href="#Jacobian_Helpers.calc_E">calc_E</a></code></li>
 <li><code><a title="Jacobian_Helpers.calc_F" href="#Jacobian_Helpers.calc_F">calc_F</a></code></li>

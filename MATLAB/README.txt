@@ -14,6 +14,10 @@ HANK_All.m: This is a self-contained file for the HANK model.
     It solves the steady state and then goes through each step of our algorithm to calculate the Jacobians.
     It then plots the Jacobian and IRFs we show in the paper.
 
+HA_All_Nonuniform.py: Same as HA_All.py but for the nonuniform time grid that grows at 3%.
+
+HANK_All_Nonuniform.py: Same as HANK_All.py but for the nonuniform time grid that grows at 3%.
+
 Helper Functions:
 
 AxisFonts.m: Sets graphical parameters for plots.

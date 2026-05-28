@@ -6,24 +6,28 @@ import matplotlib.pyplot as plt
 from toolkit import jacobian as jac      # discrete-time code to get GE jacobian
 from toolkit import aux_speed as aux_jac # discrete-time code for each step
 import HA_DT as ha               # discrete-time version of model
+from Nonuniform_helpers import policy_function_hybrid_fast_anticipate, exp_grid, eig_pi_ops, expectation_vector_hybrid_fast, solve_outputs
 
 # User Inputs
 dt  = 1.0              # time step
 T   = int(300 / dt)    # number of time periods
-Nz  = 25               # number of idiosyncratic productivity states
-Na  = 2500             # number of asset gridpoints
+Nz  = 50               # number of idiosyncratic productivity states
+Na  = 5000             # number of asset gridpoints
 EGM = True             # solve for steady state via endogenous gridpoint or implicit method
 iter_style = 'DT_loop' # how to iterate forward in phi and E calculations
                        # 3 options: 'CT_matrix', 'CT_loop', 'DT_loop' where 'CT' uses ly and DT uses Pi and
                        # 'matrix' does a sparse matrix multiplication while 'loop' uses a for loop with numba
+paper_figs = True # whether to only show figures in paper
 
 # Plotting Inputs
-plot_T = 30 # Number of periods to plot for IRFs
+plot_T = 30                              # Number of periods to plot for IRFs
+t_vec  = np.linspace(0, (T - 1) * dt, T) # Time vector
 
 # String to append to file names
 str_append  = f"_Nz{Nz}_Na{Na}"
 str_append += "_HJB" if not EGM else ""
 str_append += f"_dt{dt}" if dt != 1.0 else ""
+str_append_nonuniform = str_append + "_3" # Figure file name string for nonuniform grid
 
 fig_dir = "Figures/HA_"
 
@@ -31,10 +35,10 @@ fig_dir = "Figures/HA_"
 ## can be 1 if using DT_loop; otherwise less than 1
 mu = 1 if iter_style == 'DT_loop' else 0.5
 
-# Get Jacobians in continuous time
+# Get Jacobians and IRFs in continuous time
 p, n            = get_parameters(Nz = Nz, Na = Na, mu = mu) # loads parameters and grids
-ss              = get_ss(p, n, EGM = EGM, HANK = False)     # gets steady state
-ss, store       = step_0(p, n, ss, EGM = EGM, dt = dt)      # stores asset derivative, constrained agents, asset transition indices given savings rule
+ss2             = get_ss(p, n, EGM = EGM, HANK = False)     # gets steady state
+ss, store       = step_0(p, n, ss2, EGM = EGM, dt = dt)     # stores asset derivative, constrained agents, asset transition indices given savings rule
 dphi_da, c_t, D = policy_function(p, n, ss, store, T, dt = dt, iter_style = iter_style)   # policy functions and distribution change from future shock
 E_t             = expectation_vector(ss, store['E'], T, dt = dt, iter_style = iter_style) # expectation vector (for propagation of distribution)
 F               = fake_news(store['prices'], store['outputs'], E_t, D, T, c_t)            # fake news operator
@@ -49,7 +53,17 @@ F2                  = fake_news(store['prices'], store['outputs'], E_t, D2, T, c
 J2                  = jacobian(store['prices'], store['outputs'], F2, dt = dt)
 irfs2               = inversion(p, n, ss, store, J2, z_hat, T)
 
-# Get Jacobians in discrete time
+# Get Jacobians and IRFs with Nonuniform grid
+t_vec_exp, dt_vec_exp       = exp_grid(T, dt0=1.0, growth=1.03, cap=None)
+ss_exp, store_exp           = step_0(p, n, ss2, EGM = EGM, dt = float(np.max(dt_vec_exp)), iter_style = iter_style, nonuniform = True)
+ops                         = eig_pi_ops(n, dt_vec_exp)
+dphi_da_exp, c_t_exp, D_exp = policy_function_hybrid_fast_anticipate(p, n, ss_exp, store_exp, t_vec_exp, dt_vec_exp, ops, anticipate = False, PRICES = store_exp['prices'])
+E_t_exp                     = expectation_vector_hybrid_fast(n, ss_exp, store_exp, dt_vec_exp, ops, OUTPUTS = store_exp['outputs'])
+F_exp                       = fake_news(store_exp['prices'], store_exp['outputs'], E_t_exp, D_exp, len(t_vec_exp), c_t_exp)
+J_exp                       = jacobian(store_exp['prices'], store_exp['outputs'], F_exp, dt_vec=dt_vec_exp)
+irfs_exp                    = solve_outputs(p, n, ss_exp, store_exp, J_exp, t_vec_exp)
+
+# Get Jacobians and IRFs in discrete time
 ## first, steady-state in discrete time
 dt_ss = ha.ha_ss_r(Nz = Nz, Na = Na, eis = 1/p['gamma'], delta = p['d'],
                        alpha = p['alpha'], rho = p['rho_e'], sigma = p['sigma_e'],
@@ -70,6 +84,7 @@ G = jac.get_G(block_list = [ha.firm, ha.mkt_clearing, ha.household], exogenous =
               targets = ['asset_mkt'], T = T, ss = dt_ss)
 
 # Plot Jacobians for Comparison
+plt.rc('legend', fontsize = 16)
 orig_cols       = [0, 100, 200] # time periods to plot
 columns_to_plot = [int(orig_cols[i] / dt) for i in range(len(orig_cols))] # converted to columns when dt != 1
 linestyles      = ['-', '--', '-.', ':', (0, (1, 10))]
@@ -90,10 +105,10 @@ def plot_Jac(shock_name = 'K', price = 'r', fig_dir = 'Figures/', str_append = '
         DT_Jac  = np.vstack([top_row, DT_Jac])
 
     for i, col in enumerate(columns_to_plot):
-        plt.plot(np.arange(0, T * dt, dt), J[price][shock_name][:, col] / CT_Val,
+        plt.plot(t_vec, J[price][shock_name][:, col] / CT_Val,
                  label = f"Continuous (surprise)", linestyle = linestyles[0], linewidth = 3, color = default_colors[0])
-        plt.plot(np.arange(0, T * dt, dt), J2[price][shock_name][:, col] / CT_Val,
-                 label = f"Continuous (anticipation)", linestyle = linestyles[3], linewidth = 4, color = default_colors[0])
+        plt.plot(t_vec, J2[price][shock_name][:, col] / CT_Val,
+                 label = f"Continuous (anticipation)", linestyle = linestyles[3], linewidth = 3, color = default_colors[0])
         plt.plot(range(int(T * dt)), DT_Jac[:int(T * dt), orig_cols[i]], label = f"Discrete",
                     linestyle = linestyles[1], linewidth = 3, color = default_colors[1])
         if col == 0 and shock_name == 'K' and price == 'w':
@@ -107,11 +122,13 @@ def plot_Jac(shock_name = 'K', price = 'r', fig_dir = 'Figures/', str_append = '
 
     plt.savefig(fig_dir + "Jac_" + shock_name + price + str_append + ".pdf")
     plt.show()
+    plt.close()
 
 plot_Jac(shock_name = 'K', price = 'r', str_append = str_append, fig_dir = fig_dir)
-plot_Jac(shock_name = 'C', price = 'r', str_append = str_append, fig_dir = fig_dir)
 plot_Jac(shock_name = 'K', price = 'w', str_append = str_append, fig_dir = fig_dir)
-plot_Jac(shock_name = 'C', price = 'w', str_append = str_append, fig_dir = fig_dir)
+if not paper_figs:
+    plot_Jac(shock_name = 'C', price = 'r', str_append = str_append, fig_dir = fig_dir)
+    plot_Jac(shock_name = 'C', price = 'w', str_append = str_append, fig_dir = fig_dir)
 
 # impulse responses of r, w, K, C to a Z (productivity) shock
 DT_jac_rZ = G['r']['Z']
@@ -124,10 +141,9 @@ DT_irf_r = DT_jac_rZ @ z_hat_dt
 DT_irf_w = DT_jac_wZ @ z_hat_dt
 
 # plot impulse responses of r and w to Z shock
-plt.rc('legend', fontsize = 16)
 plot_t = np.minimum(plot_T, int(T * dt))
 
-def plot_IRF(DT_irf, CT_irf, CT_irf2, shock_name = "r", fig_dir = 'Figures/', str_append = ''):
+def plot_IRF(DT_irf, CT_irf, CT_irf2, shock_name = "r", fig_dir = 'Figures/', str_append = '', add_nonuniform = False, CT_irf3 = None):
     if shock_name == "K":
         DT_irf = np.insert(DT_irf, 0, 0)    # discrete-time plots choice of assets each period instead of assets at start of period, so adjust to match
         CT_val = np.sum(ss['gm'] * n['aa']) # steady-state capital
@@ -139,26 +155,31 @@ def plot_IRF(DT_irf, CT_irf, CT_irf2, shock_name = "r", fig_dir = 'Figures/', st
         CT_val = 1  # no need to divide by steady state value for prices
         DT_val = 1
 
+    plt.figure()
     plt.plot(np.arange(0, plot_t, dt), CT_irf[:int(plot_T / dt)] * 100 / CT_val, label = "Continuous (surprise)",
         linestyle = linestyles[0], color = default_colors[0],
         linewidth = 3)
     plt.plot(np.arange(0, plot_t, dt), CT_irf2[:int(plot_T / dt)] * 100 / CT_val, label = "Continuous (anticipation)",
         linestyle = linestyles[3], color = default_colors[0],
-        linewidth = 4)
+        linewidth = 3)
+    if add_nonuniform:
+        plt.plot(t_vec_exp[t_vec_exp <= plot_t], CT_irf3[t_vec_exp <= plot_t] * 100 / CT_val, label = "Continuous (exponential)",
+            linestyle = linestyles[2], color = default_colors[2], linewidth = 3)
     plt.plot(DT_irf[:plot_t] * 100 / DT_val, label = "Discrete", linestyle = linestyles[1],
         color = default_colors[1], linewidth = 3)
 
     # Increase tick label sizes
-    plt.xticks(fontsize=12)
-    plt.yticks(fontsize=12)
-    plt.xlabel("Year", fontsize=14)
-    plt.ylabel("p.p. deviation from SS", fontsize=14)
+    plt.xticks(fontsize=16)
+    plt.yticks(fontsize=16)
+    plt.xlabel("Year", fontsize=18)
+    plt.ylabel("p.p. deviation from SS", fontsize=18)
 
     if shock_name == "w":
         plt.legend(framealpha=0)
     plt.tight_layout()
     plt.savefig(fig_dir + "IRF_" + shock_name + str_append + ".pdf")
     plt.show()
+    plt.close()
 
 plot_IRF(DT_irf_r, irfs['r'], irfs2['r'], shock_name = "r", str_append = str_append, fig_dir = fig_dir)
 plot_IRF(DT_irf_w, irfs['w'], irfs2['w'], shock_name = "w", str_append = str_append, fig_dir = fig_dir)
@@ -171,6 +192,12 @@ CT_C2 = J2['r']['C'] @ irfs2['r'] + J2['w']['C'] @ irfs2['w']
 
 plot_IRF(G['K']['Z'] @ z_hat_dt, CT_K, CT_K2, shock_name = "K", str_append = str_append, fig_dir = fig_dir)
 plot_IRF(G['C']['Z'] @ z_hat_dt, CT_C, CT_C2, shock_name = "C", str_append = str_append, fig_dir = fig_dir)
+
+# Add IRFs with nonuniform grid (Figure 8 in paper)
+plot_IRF(DT_irf_r, irfs['r'], irfs2['r'], shock_name = "r", str_append = str_append_nonuniform, fig_dir = fig_dir, add_nonuniform = True, CT_irf3 = irfs_exp['r'])
+plot_IRF(DT_irf_w, irfs['w'], irfs2['w'], shock_name = "w", str_append = str_append_nonuniform, fig_dir = fig_dir, add_nonuniform = True, CT_irf3 = irfs_exp['w'])
+plot_IRF(G['K']['Z'] @ z_hat_dt, CT_K, CT_K2, shock_name = "K", str_append = str_append_nonuniform, fig_dir = fig_dir, add_nonuniform = True, CT_irf3 = irfs_exp['K'])
+plot_IRF(G['C']['Z'] @ z_hat_dt, CT_C, CT_C2, shock_name = "C", str_append = str_append_nonuniform, fig_dir = fig_dir, add_nonuniform = True, CT_irf3 = irfs_exp['C'])
 
 # Steady State and Parameter Tables
 

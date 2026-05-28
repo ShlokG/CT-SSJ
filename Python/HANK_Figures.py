@@ -12,19 +12,21 @@ import json
 
 from HANK_Helpers import *
 from sequence_jacobian.blocks.support.het_support import CombinedTransition
+from Nonuniform_helpers import policy_function_hybrid_fast_anticipate, exp_grid, eig_pi_ops, expectation_vector_hybrid_fast, solve_outputs
 
 # User Inputs
 dt         = 1.0           # time step
 T          = int(300 / dt) # number of time periods
-Nz         = 25            # number of idiosyncratic productivity states
-Na         = 2500          # number of asset gridpoints
+Nz         = 50            # number of idiosyncratic productivity states
+Na         = 5000          # number of asset gridpoints
 EGM        = True          # solve for steady state via endogenous gridpoint or implicit method
 iter_style = 'DT_loop'     # how to iterate forward in phi and E calculations
                            # 3 options: 'CT_matrix', 'CT_loop', 'DT_loop' where 'CT' uses ly and DT uses Pi and
                            # 'matrix' does a sparse matrix multiplication while 'loop' uses a for loop with numba
 
 # Plotting Inputs
-plot_T = 30 # Number of periods to plot for IRFs
+plot_T = 30                              # Number of periods to plot for IRFs
+t_vec  = np.linspace(0, (T - 1) * dt, T) # Time vector
 
 # Directories
 fig_dir = 'Figures/HANK_'
@@ -33,6 +35,7 @@ fig_dir = 'Figures/HANK_'
 str_append  = f"_Nz{Nz}_Na{Na}"
 str_append += "_HJB" if not EGM else ""
 str_append += f"_dt{dt}" if dt != 1.0 else ""
+str_append_nonuniform = str_append + "_3" # Figure file name string for nonuniform grid
 
 # Load calibration
 with open('Storage/solved_params.json', 'r') as f:
@@ -55,10 +58,10 @@ calib_ha_one['beta'] = ss_het[m]['beta'] # discount rate
 # mu can be 1 if using DT_loop; otherwise less than 1
 mu = 1 if iter_style == 'DT_loop' else 0.5
 
-# Get Jacobians in continuous time
+# Get Jacobians and IRFs in continuous time
 p, n            = get_parameters_hank(calib_ha_one, EGM = EGM, mu = mu)                   # loads parameters and grids
-ss              = get_ss(p, n, EGM = EGM, HANK = True)                                    # gets steady state
-ss, store       = step_0(p, n, ss, EGM = EGM, HANK = True, dt = dt)                       # stores asset derivative, constrained agents, asset transition indices given savings rule
+ss2              = get_ss(p, n, EGM = EGM, HANK = True)                                    # gets steady state
+ss, store       = step_0(p, n, ss2, EGM = EGM, HANK = True, dt = dt)                       # stores asset derivative, constrained agents, asset transition indices given savings rule
 dphi_da, c_t, D = policy_function(p, n, ss, store, T, dt = dt, iter_style = iter_style)   # policy functions and distribution change from future shock
 E_t             = expectation_vector(ss, store['E'], T, dt = dt, iter_style = iter_style) # expectation vector (for propagation of distribution)
 F               = fake_news(store['prices'], store['outputs'], E_t, D, T, c_t)            # fake news operator
@@ -95,7 +98,32 @@ J2                 = jacobian(store['prices'], store['outputs'], F2, dt = dt)
 M2, dY_dG_ge2, _   = GE_Jacs(J2, dG, dT, np.zeros(T2), T, T2, p, ss['r'], C, Capital, M = None)
 _, dY_dr_ge2, _    = GE_Jacs(J2, np.zeros(T2), np.zeros(T2), dr, T, T2, p, ss['r'], C, Capital, M = M2)
 
-# Get Jacobians in discrete time
+# Jacobians and IRFs with nonuniform time grid
+t_vec_exp, dt_vec_exp = exp_grid(T, dt0=1.0, growth=1.03, cap=None)
+ss_exp, store_exp = step_0(p, n, ss2, EGM=EGM, HANK=True, dt=float(np.max(dt_vec_exp)), iter_style = iter_style, nonuniform = True)
+ops = eig_pi_ops(n, dt_vec_exp)
+dphi_da_exp, c_t_exp, D_exp = policy_function_hybrid_fast_anticipate(p, n, ss_exp, store_exp, t_vec_exp, dt_vec_exp, ops, anticipate = False, PRICES = store_exp['prices'])
+E_t_exp                     = expectation_vector_hybrid_fast(n, ss_exp, store_exp, dt_vec_exp, ops, OUTPUTS = store_exp['outputs'])
+F_exp                       = fake_news(store_exp['prices'], store_exp['outputs'], E_t_exp, D_exp, len(t_vec_exp), c_t_exp)
+J_exp                       = jacobian(store_exp['prices'], store_exp['outputs'], F_exp, dt_vec=dt_vec_exp)
+
+## IRF calculation as earlier but on nonuniform time grid
+T2_exp = len(t_vec_exp) - 10
+dG_exp = np.exp(-p["rho_G"] * t_vec_exp[:T2_exp])
+dr_exp = p["rho_r"] ** t_vec_exp[:T2_exp]
+dB_exp = np.zeros(T2_exp)
+for t in range(T2_exp):
+    dt_t = dt_vec_exp[t]
+    dB_lag = dB_exp[t - 1] if t > 0 else 0.0
+    dB_exp[t] = (1 - p["rho_b"] * dt_t) * (dB_lag + dG_exp[t] * dt_t)
+dB_lag = np.concatenate(([0.0], dB_exp[:-1]))
+dT_exp = dG_exp + ((1 + ss_exp["r"]) * dB_lag - dB_exp) / dt_vec_exp[:T2_exp]
+
+M_exp, dY_dG_ge_exp, dY_dr_ge_exp = GE_Jacs_nonuniform(
+    J_exp, dG_exp, dT_exp, dr_exp, t_vec_exp, ss_exp["r"], np.sum(ss_exp["gm"] * n["aa"])
+)
+
+# Get Jacobians and IRFs in discrete time
 
 # Steady State Calculation in discrete time
 dt_ss, dt_sol = hank_ss_r(hh_het, params, calib_ha_one, p, lb = n['rmin'], ub = n['rmax'],
@@ -145,57 +173,97 @@ dT_dt     = dG_dt + (1 + dt_ss['r']) * dB_lag_dt - dB_dt
 curlyMs, dY_dG_dt, _ = GE_Jacs_dt(curlyJs, dG_dt, dT_dt, np.zeros(T2), T, T2, p, dt_ss['r'], dt_ss['C'], dt_ss['A'], curlyMs = None)
 _, dY_dr_dt, _       = GE_Jacs_dt(curlyJs, np.zeros(T2), np.zeros(T2), dr_dt, T, T2, p, dt_ss['r'], dt_ss['C'], dt_ss['A'], curlyMs = curlyMs)
 
-# Plot MPC Jacobian
+# Plot MPC Jacobian (part of Figure 4 in paper)
 orig_cols       = [0, 100, 200] # time periods to plot
 columns_to_plot = [int(orig_cols[i] / dt) for i in range(len(orig_cols))] # converted to columns when dt != 1
 linestyles      = ['-', '--', '-.', ':', (0, (1, 10))]
 default_colors  = plt.rcParams['axes.prop_cycle'].by_key()['color']
 
+LEGEND_FONTSIZE = 18
+AXIS_LABELSIZE = 18
+TICK_LABELSIZE = 16
+TICK_LENGTH = 6
+TICK_WIDTH = 1.2
+
 for i, col in enumerate(columns_to_plot):
-    plt.plot(np.arange(0, T * dt, dt), J['w']['C'][:, col] / C,
+    plt.plot(t_vec, J['w']['C'][:, col] / C,
              label = f"Continuous (surprise)",
              linestyle = linestyles[0], color = default_colors[0], linewidth = 3)
-    plt.plot(np.arange(0, T * dt, dt), J2['w']['C'][:, col] / C,
+    plt.plot(t_vec, J2['w']['C'][:, col] / C,
              label=f"Continuous (anticipated)",
              linestyle = linestyles[3], linewidth = 4, color = default_colors[0])
-    plt.plot(np.arange(0, int(T * dt)), curlyJs['C']['Z'][:int(T * dt), orig_cols[i]] / dt_ss['C'],
+    plt.plot(t_vec, curlyJs['C']['Z'][:int(T * dt), orig_cols[i]] / dt_ss['C'],
              label = f"Discrete", linestyle = linestyles[1],
              color = default_colors[1], alpha = 0.8, linewidth = 3)
     if i == 0:
-        plt.legend(framealpha=0)
+        plt.legend(framealpha=0, fontsize=LEGEND_FONTSIZE)
 
-plt.xlabel("Year", fontsize=14)
-plt.ylabel("p.p. deviation from SS", fontsize = 14)
-plt.xticks(fontsize = 12)
-plt.yticks(fontsize = 12)
+plt.xlabel("Year", fontsize=AXIS_LABELSIZE)
+plt.ylabel("p.p. deviation from SS", fontsize=AXIS_LABELSIZE)
+plt.xticks(fontsize=TICK_LABELSIZE)
+plt.yticks(fontsize=TICK_LABELSIZE)
 plt.tight_layout()
 plt.savefig(fig_dir + "Jac_YZ" + str_append + ".pdf")
 plt.show()
+plt.close()
 
-# Plot IRFs
+# Plot IRFs (part of Figure 4 in paper)
 plt.plot(dY_dG_ge[:plot_T], label = "Continuous (surprise)", linestyle = linestyles[0], linewidth = 3, color = default_colors[0])
 plt.plot(dY_dG_ge2[:plot_T], label = "Continuous (anticipated)", linestyle = linestyles[3], linewidth = 4, color = default_colors[0])
 plt.plot(dY_dG_dt[:plot_T], label = "Discrete", linestyle = linestyles[1], linewidth = 3, color = default_colors[1])
-plt.legend(framealpha = 0)
-plt.xlabel("Year", fontsize = 14)
-plt.ylabel("p.p. deviation from SS", fontsize = 14)
-plt.xticks(fontsize = 12)
-plt.yticks(fontsize = 12)
+plt.legend(framealpha=0, fontsize=LEGEND_FONTSIZE)
+plt.xlabel("Year", fontsize=AXIS_LABELSIZE)
+plt.ylabel("p.p. deviation from SS", fontsize=AXIS_LABELSIZE)
+plt.xticks(fontsize=TICK_LABELSIZE)
+plt.yticks(fontsize=TICK_LABELSIZE)
 plt.tight_layout()
 plt.savefig(fig_dir + "IRF_YG" + str_append + ".pdf")
 plt.show()
+plt.close()
 
 plt.plot(dY_dr_ge[:plot_T], label = "Continuous (surprise)", linestyle = linestyles[0], linewidth = 3, color = default_colors[0])
 plt.plot(dY_dr_ge2[:plot_T], label = "Continuous (anticipated)", linestyle = linestyles[3], linewidth = 4, color = default_colors[0])
 plt.plot(dY_dr_dt[:plot_T], label = "Discrete", linestyle = linestyles[1], linewidth = 3, color = default_colors[1])
-plt.legend(framealpha = 0)
-plt.xlabel("Year", fontsize = 14)
-plt.ylabel("p.p. deviation from SS", fontsize = 14)
-plt.xticks(fontsize = 12)
-plt.yticks(fontsize = 12)
+plt.legend(framealpha=0, fontsize=LEGEND_FONTSIZE)
+plt.xlabel("Year", fontsize = AXIS_LABELSIZE)
+plt.ylabel("p.p. deviation from SS", fontsize = AXIS_LABELSIZE)
+plt.xticks(fontsize = TICK_LABELSIZE)
+plt.yticks(fontsize = TICK_LABELSIZE)
 plt.tight_layout()
 plt.savefig(fig_dir + "IRF_Yr" + str_append + ".pdf")
 plt.show()
+plt.close()
+
+# IRFs with nonuniform time grid (Figure 9 in paper)
+plt.plot(dY_dG_ge[:plot_T], label = "Continuous (surprise)", linestyle = linestyles[0], linewidth = 3, color = default_colors[0])
+plt.plot(dY_dG_ge2[:plot_T], label = "Continuous (anticipated)", linestyle = linestyles[3], linewidth = 3, color = default_colors[0])
+plt.plot(t_vec_exp[t_vec_exp <= plot_T], dY_dG_ge_exp[np.where(t_vec_exp <= plot_T)], label = "Continuous (exponential)",
+         linestyle = linestyles[2], linewidth = 3, color = default_colors[2])
+plt.plot(dY_dG_dt[:plot_T], label = "Discrete", linestyle = linestyles[1], linewidth = 3, color = default_colors[1])
+plt.legend(framealpha=0, fontsize=LEGEND_FONTSIZE)
+plt.xlabel("Year", fontsize=AXIS_LABELSIZE)
+plt.ylabel("p.p. deviation from SS", fontsize=AXIS_LABELSIZE)
+plt.xticks(fontsize=TICK_LABELSIZE)
+plt.yticks(fontsize=TICK_LABELSIZE)
+plt.tight_layout()
+plt.savefig(fig_dir + "IRF_YG" + str_append_nonuniform + ".pdf")
+plt.show()
+plt.close()
+
+plt.plot(dY_dr_ge[:plot_T], label = "Continuous (surprise)", linestyle = linestyles[0], linewidth = 3, color = default_colors[0])
+plt.plot(dY_dr_ge2[:plot_T], label = "Continuous (anticipated)", linestyle = linestyles[3], linewidth = 3, color = default_colors[0])
+plt.plot(t_vec_exp[t_vec_exp <= plot_T], dY_dr_ge_exp[np.where(t_vec_exp <= plot_T)], label = "Continuous (exponential)",
+         linestyle = linestyles[2], linewidth = 3, color = default_colors[2])
+plt.plot(dY_dr_dt[:plot_T], label = "Discrete", linestyle = linestyles[1], linewidth = 3, color = default_colors[1])
+plt.legend(framealpha=0, fontsize=LEGEND_FONTSIZE)
+plt.xlabel("Year", fontsize = AXIS_LABELSIZE)
+plt.ylabel("p.p. deviation from SS", fontsize = AXIS_LABELSIZE)
+plt.xticks(fontsize = TICK_LABELSIZE)
+plt.yticks(fontsize = TICK_LABELSIZE)
+plt.tight_layout()
+plt.savefig(fig_dir + "IRF_Yr" + str_append_nonuniform + ".pdf")
+plt.show()
+plt.close()
 
 # Note: If IRFs have the opposite sign as expected in the first period, increase T
 

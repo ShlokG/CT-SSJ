@@ -16,6 +16,10 @@ HANK_All.py: This is a self-contained file for the HANK model.
     It solves the steady state and then goes through each step of our algorithm to calculate the Jacobians.
     It then plots the Jacobian and IRFs we show in the paper (Figure 4).
 
+HA_All_Nonuniform.py: Same as HA_All.py but for the nonuniform time grid that grows at 3%.
+
+HANK_All_Nonuniform.py: Same as HANK_All.py but for the nonuniform time grid that grows at 3%.
+
 "Model.py": Creates functions necessary to run the HA and HANK models, passing in the model-specific matrices/functions.
 
 "Parameters.py": Functions to return the parameters for the HA and HANK models.
@@ -26,19 +30,24 @@ HANK_All.py: This is a self-contained file for the HANK model.
 "Jacobian_Helpers.py": Functions used to calculate Jacobians using our method, following Appendix F.
 	Documentation for these functions are in Jacobian_Helpers.html
 
-"HA_Figures.py": Produces the Jacobian and IRF figures for the HA model we show in the paper (Figures 1 and 2) as well as the consumption Jacobians.
+"HA_Figures.py": Produces the Jacobian and IRF figures for the HA model we show in the paper (Figures 1, 2, 8) as well as the capital Jacobians.
     Also produces the .tex files for parameters and steady states (Tables 1 and 2).
 
 "HA_Runtime.py": Calculates runtimes for the steady state and each step of the Jacobian algorithm.
-    Does so in 3 cases: discrete time, continuous time with steady state solved via EGM and continuous time with steady state solved via implicit method.
+    Does so in 4 cases: 1. discrete time, 2. continuous time with steady state solved via EGM,
+        3. continuous time with steady state solved via implicit method,
+        4. continuous time with a nonuniform time grid that grows exponentially at 3%, solved via EGM.
     Produces the runtime plots for the HA model (Figure 3 and 6a as well as Table 5).
 
-"HANK_Figures.py": Produces the Jacobian and IRF figures for the HANK model we show in the paper (Figure 4).
+"HANK_Figures.py": Produces the Jacobian and IRF figures for the HANK model we show in the paper (Figure 4, 9).
     Also produces the .tex files for parameters and steady states (Tables 3 and 4).
 
 "HANK_Runtime.py": Same as "HA_Runtime.py" but for the HANK model. Produces Figures 5, 6b, and Table 6.
 
 "Runtime_Plot_Fns.py": Functions to produce the runtime plots. Called by "HA_Runtime.py" and "HANK_Runtime.py"
+
+"HA_policy_runtime.py": Calculates runtimes for individual components of the policy function calculation under discrete and continuous time.
+    Produces the runtime plot for the HA model (Figure 7).
 
 "HA_DT.py": Functions used to calculate the steady state of the HA model in discrete time.
     Also calculates the runtimes of the IRF calculation step in discrete time in the HA model.
@@ -47,6 +56,8 @@ HANK_All.py: This is a self-contained file for the HANK model.
 	given the partial equilibrium Jacobians calculated using functions in Jacobian_Helpers.py.
     Also includes functions to calculate each step of the discrete-time algorithm and IRFs for the HANK model in discrete time.
 
+"Nonuniform_helpers.py": Functions useful in solving the model with nonuniform time grids.
+
 Folder Descriptions:
 
 Figures: Where all plots and the CSV and .tex files for runtimes are stored.
@@ -54,3 +65,12 @@ Storage: Parameters for the HANK model and the discrete-time version of the mode
 toolkit: Folder from Auclert et al. (2021) that stores utility functions and used for the discrete-time calculations for the HA model.
 sequence_jacobian: Folder from Auclert et al. (2024) used for the discrete-time calculations for the HANK model.
 
+Replication Instructions:
+
+To get the figures and tables in the paper, each of the 5 files producing results can be run independently.
+    1. HA_Figures.py gives Figures 1, 2, 8 and Tables 1, 2
+    2. HANK_Figures.py gives Figures 4, 9 and Tables 3 and 4
+    3. HA_Runtime.py gives Figures 3 and 6a and Table 5.
+    4. HANK_Runtime.py gives Figures 5, 6b, and Table 6.
+    5. HA_policy_runtime.py gives Figure 7.
+    NOTE: HA_Runtime and HANK_Runtime take a long time to run as they solves the model under 10 grids for 4 solution types and each step is run up to 700 times (to average across times) 

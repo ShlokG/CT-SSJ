@@ -563,6 +563,7 @@ plt.yticks(fontsize = 12)
 plt.tight_layout()
 plt.savefig(f'{fig_dir}MPC{str_append}.pdf')
 plt.show()
+plt.close()
 
 # plot impulse responses of Y to G and r shocks
 plt.rcParams['legend.fontsize'] = 16
@@ -577,6 +578,7 @@ plt.yticks(fontsize = 12)
 plt.tight_layout()
 plt.savefig(f'{fig_dir}IRF_YG{str_append}.pdf')
 plt.show()
+plt.close()
 
 plt.plot(np.arange(0, plot_T, dt), dY_dr_ge[:int(plot_T / dt)], label='Continuous (surprise)', linewidth=3, color=default_colors[0])
 plt.legend(loc = 'best', fontsize = 16)
@@ -587,5 +589,6 @@ plt.yticks(fontsize = 12)
 plt.tight_layout()
 plt.savefig(f'{fig_dir}IRF_Yr{str_append}.pdf')
 plt.show()
+plt.close()
 
 # Note: If IRFs have the opposite sign to expected in the first period, increase T

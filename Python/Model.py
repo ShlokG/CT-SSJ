@@ -64,8 +64,8 @@ def get_ss(p, n, EGM = True, HANK = False):
 # STEP 0: Calculate necessary values
 ## store captures everything the user should provide
 ### (some matrices unnecessary if others provided)
-def step_0(p, n, ss, EGM = True, HANK = False, dt = 1.0):
-    ss        = prelim_step(ss, n, EGM = EGM, dt = dt)    # Calculate asset derivatives, which agents constrained, indices given savings rule
+def step_0(p, n, ss, EGM = True, HANK = False, dt = 1.0, iter_style = None, nonuniform = False):
+    ss        = prelim_step(ss, n, EGM = EGM, dt = dt, iter_style = iter_style, nonuniform = nonuniform)    # Calculate asset derivatives, which agents constrained, indices given savings rule
     ss['up']  = utility_prime(ss['c'], p['gamma'])        # u'(c) at steady state
     ss['upp'] = utility_second_deriv(ss['c'], p['gamma']) # u"(c) at steady state
 
@@ -179,10 +179,10 @@ def fake_news(prices, outputs, E_t, D, T, c_t):
     return F
 
 # STEP 4: Calculate the Jacobian
-def jacobian(prices, outputs, F, dt = 1.0):
+def jacobian(prices, outputs, F, dt = 1.0, dt_vec = None):
     J = {}
     for pr in prices:
-        J[pr] = calc_J(F[pr], outputs, dt = dt)
+        J[pr] = calc_J(F[pr], outputs, dt = dt, dt_vec = dt_vec)
     return J
 
 # STEP 5: Calculate IRFs (in General Equilibrium)

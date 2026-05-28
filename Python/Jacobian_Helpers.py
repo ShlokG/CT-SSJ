@@ -452,19 +452,44 @@ def J_from_F(F, dt = 1.0):
         J[1:, t] = J[:-1, t - 1] + dt * F[1:, t]
     return J
 
-def calc_J(F, outputs, dt = 1.0):
+@njit
+def J_from_F_nonuniform(F, dt_col):
+    """Helper function to calculate the Jacobian with non-uniform time steps
+
+    Args:
+        F: Fake news matrix (T x T)
+        dt_col: Time step for each column index (length T array).
+            dt_col[s] is the duration of the time interval at index s.
+
+    Returns:
+        J: Jacobian matrix (T x T)
+    """
+    J = F.copy()
+    for t in range(1, J.shape[0]):
+        J[1:, t] = J[:-1, t - 1] + dt_col[t] * F[1:, t]
+    return J
+
+def calc_J(F, outputs, dt = 1.0, dt_vec = None):
     """Calculates the Jacobian for each output by adding up diagonals of the fake news matrix
 
     Args:
         F: A dictionary of fake news matrices.
         outputs: A list of output variables.
+        dt: Uniform time step (scalar, used when dt_vec is None).
+        dt_vec: Non-uniform time step sizes (array of length T-1). Overrides dt if provided.
 
     Returns:
         J: A dictionary of Jacobian matrices.
     """
     J = {}
-    for output in outputs:
-        J[output] = J_from_F(F[output], dt = dt) * dt
+    if dt_vec is not None:
+        # Build length-T column scaling: dt_col[s] is the shock duration at index s
+        dt_col = np.append(dt_vec, dt_vec[-1])  # repeat last step for boundary
+        for output in outputs:
+            J[output] = J_from_F_nonuniform(F[output], dt_col) * dt_col[np.newaxis, :]
+    else:
+        for output in outputs:
+            J[output] = J_from_F(F[output], dt = dt) * dt
 
     return J
 

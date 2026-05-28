@@ -6,7 +6,11 @@ import numpy as np
 
 # Plot the runtimes
 default_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
-plt.rc('legend',fontsize=16)
+LEGEND_FONTSIZE = 22
+AXIS_LABELSIZE = 25
+TICK_LABELSIZE = 20
+TICK_LENGTH = 6
+TICK_WIDTH = 1.2
 
 # Define a formatter function
 def thousands_formatter(x, pos):
@@ -32,6 +36,8 @@ def plot_fn(df, str_append = "", no_legend = False, fig_dir = "Figures/"):
     df1 = df[df['Type'] == 'Continuous, EGM']
     df2 = df[df['Type'] == 'Continuous, Implicit']
     df3 = df[df['Type'] == 'Discrete']
+
+    plt.rc('legend',fontsize=16)
     plt.plot(df1['Gridpoints'], df1[yval], label='Continuous, EGM', linestyle='--', linewidth=3, color=default_colors[2])
     plt.plot(df2['Gridpoints'], df2[yval], label='Continuous, Implicit', linestyle=':', linewidth=3, color=default_colors[3])
     plt.plot(df3['Gridpoints'], df3[yval], label='Discrete', linestyle='-.', linewidth=3, color=default_colors[1])
@@ -58,22 +64,26 @@ def plot_fn(df, str_append = "", no_legend = False, fig_dir = "Figures/"):
     plt.savefig(fig_dir + "runs" + str_append + ".pdf")
     plt.show()
 
-def plot_cumulative_runtime(df, typed = "Continuous", str_append="", no_legend = False, fig_dir = "Figures/"):
+def plot_cumulative_runtime(df, typed = "Continuous", str_append = "", no_legend = False, no_ylabel = False, fig_dir = "Figures/"):
     """Plot the runtimes for each step of the Jacobian calculation for given method.
-    
+
     Args:
         df (pd.DataFrame): DataFrame containing the runtimes for each method
         typed (str): Type of solution method to focus on
         str_append (str): String to append to the filename
         no_legend (bool): Whether to include a legend in the plot
+        no_ylabel (bool): Whether to omit the y-axis label
         fig_dir (str): Directory to save the figure to
 
     Returns:
         None (just saves the figure to specified file)
     """
 
-    # Get the list of columns starting from 'Step 1'
-    step_columns = [col for col in df.iloc[:,3:8]]
+    step_columns = [
+        col
+        for col in ["Setup", "Policy functions", "Expectation vector", "Fake news matrix", "Jacobian", "Inversion"]
+        if col in df.columns
+    ]
 
     # Initialize cumulative sum DataFrame
     cumulative_df = df[['Gridpoints', 'Type']].copy()
@@ -90,8 +100,9 @@ def plot_cumulative_runtime(df, typed = "Continuous", str_append="", no_legend =
 
     # Plot cumulative runtime for each step in a single plot
     previous_step_data = np.zeros_like(cumulative_df['Gridpoints'])
-    plt.figure(figsize=(10, 6))
-    linestyles = ['solid', 'solid', 'solid', 'dashed', 'dotted']
+    plt.rc('legend', fontsize=LEGEND_FONTSIZE)
+    plt.figure(figsize=(10, 7.5))
+    linestyles = ['solid', 'solid', 'solid', 'solid', 'dashed', 'dotted']
     for step_num in range(len(step_columns)):
         step = step_columns[step_num]
         plt.plot(cumulative_df['Gridpoints'], cumulative_df[step],
@@ -104,15 +115,20 @@ def plot_cumulative_runtime(df, typed = "Continuous", str_append="", no_legend =
         plt.legend(frameon=False)
 
     # Add labels and title
-    plt.xlabel('Gridpoints (thousands)', fontsize=16)
-    plt.ylabel('Cumulative Runtime (seconds)', fontsize=16)
+    plt.xlabel('Gridpoints (thousands)', fontsize=AXIS_LABELSIZE)
+    ylabel_color = 'black' if not no_ylabel else 'white'
+    plt.ylabel('Cumulative Runtime (seconds)', fontsize=AXIS_LABELSIZE,
+               labelpad=2, color=ylabel_color)
 
     # Increase tick label sizes
-    plt.xticks(fontsize=12)
-    plt.yticks(fontsize=12)
+    plt.xticks(fontsize=TICK_LABELSIZE)
+    plt.yticks(fontsize=TICK_LABELSIZE)
+    plt.tick_params(axis='both', which='major', length=TICK_LENGTH, width=TICK_WIDTH)
 
     # Apply the formatter to the x-axis
     plt.gca().xaxis.set_major_formatter(FuncFormatter(thousands_formatter))
+    plt.xlim(0, cumulative_df['Gridpoints'].max())
     plt.ylim(0, ymax)
-    plt.savefig(fig_dir + "cumulative_runtime" + str_append + ".pdf", dpi = 1200)
+    plt.savefig(fig_dir + "cumulative_runtime" + str_append + ".pdf", dpi=1200,
+                bbox_inches='tight', pad_inches=0.05)
     plt.show()

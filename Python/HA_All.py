@@ -528,6 +528,7 @@ def plot_Jac(jac, shock_name = 'K', price = 'r', fig_dir = 'Figures/', str_appen
 
     plt.savefig(fig_dir + "Jac_" + shock_name + price + str_append + ".pdf")
     plt.show()
+    plt.close()
 
 plot_Jac(J_rr, shock_name = 'r', price = 'r', fig_dir = fig_dir, str_append = str_append)
 plot_Jac(J_rK, shock_name = 'K', price = 'r', fig_dir = fig_dir, str_append = str_append)
@@ -561,6 +562,7 @@ def plot_IRF(CT_irf, shock_name = "r", fig_dir = 'Figures/', str_append = ''):
     plt.tight_layout()
     plt.savefig(fig_dir + "IRF_" + shock_name + str_append + ".pdf")
     plt.show()
+    plt.close()
 
 plot_IRF(dr, shock_name = "r", fig_dir = fig_dir, str_append = str_append)
 plot_IRF(dw, shock_name = "w", fig_dir = fig_dir, str_append = str_append)

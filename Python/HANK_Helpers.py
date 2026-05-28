@@ -190,4 +190,50 @@ def GE_Jacs_dt(J, dG, dT, dr, T, T2, p, r, C, Capital, curlyMs = None):
 
     return curlyMs, dY, dr_ge
 
+def GE_Jacs_nonuniform(J, dG, dT, dr, t_vec, r, Capital):
+    T = len(t_vec)
+    T2 = len(dG)
+    J_Cw = J["w"]["C"]
+    J_Cr = J["r"]["C"]
+    t_diff = t_vec[np.newaxis, :T] - t_vec[:T, np.newaxis]
+    K = np.where(t_diff > 0, -(1 + r) ** (-t_diff), 0.0)
+    A = K @ (np.eye(T) - J_Cw)
+    M = np.linalg.solve(A[:T2, :T2], K[:T2, :T2])
+    dY_dG_ge = M @ (dG - J_Cw[:T2, :T2] @ dT)
+    dT_bal = dr * Capital
+    dY_dr_ge = M @ (J_Cr[:T2, :T2] @ dr - J_Cw[:T2, :T2] @ dT_bal)
+    return M, dY_dG_ge, dY_dr_ge
 
+
+# Nonuniform-time-grid version of GE_Jacs.
+# Builds the bond-pricing kernel K from t_vec instead of np.arange(T):
+#   K[i, j] = -(1+r)^(-(t_vec[j] - t_vec[i])) for j > i, else 0
+# Currently only the passive monetary policy branch (p['phi'] == 1.0) is supported.
+def GE_Jacs_nonuniform_time(J, dG, dT, dr, T, T2, p, r, C, Capital, t_vec, M = None):
+    if p['phi'] != 1.0:
+        raise NotImplementedError("GE_Jacs_nonuniform is only implemented for p['phi'] == 1.0")
+
+    if M is None:
+        diff = t_vec[None, :] - t_vec[:, None]
+        K = -((1 + r) ** (-diff))
+        K[np.tril_indices_from(K)] = 0.0
+
+    J_Cw = J['w']['C'][:T2, :T2]
+    J_Cr = J['r']['C'][:T2, :T2]
+
+    if M is None:
+        A = K @ (np.eye(T) - J['w']['C'])
+        M = np.linalg.solve(A[:T2, :T2], K[:T2, :T2])
+
+    J_YG   = M
+    J_YT   = -M @ J_Cw
+    J_Yeps = M @ J_Cr
+
+    dY_dG_ge = M @ (dG - J_Cw @ dT)
+    dT_bal   = dr * Capital
+    dY_dr_ge = M @ (J_Cr @ dr - J_Cw @ dT_bal)
+
+    dY_ge = dY_dG_ge + dY_dr_ge
+    dr_ge = np.ones(T2) * dr
+
+    return M, dY_ge, dr_ge
